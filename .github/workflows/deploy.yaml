@@ -1,0 +1,93 @@
+name: Build & Deploy (ECS via Terraform)
+
+on:
+  push:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+env:
+  AWS_REGION: eu-central-1
+  APP_NAME: petclinic
+  ECR_REPO: petclinic
+
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write # required for OIDC
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # (Optional) If your Dockerfile builds the app with Maven, you can skip this step.
+      # If you prefer pre-building the JAR, uncomment:
+      # - name: Set up JDK 17
+      # uses: actions/setup-java@v4
+      # with:
+      # distribution: temurin
+      # java-version: '17'
+      # - name: Build JAR (skip tests for speed)
+      # run: mvn -DskipTests package
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }} # e.g. arn:aws:iam::<ACCOUNT_ID>:role/github-oidc-terraform-deploy
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build & push Docker image
+        id: docker
+        env:
+          ECR_REGISTRY: ${{ steps.ecr.outputs.registry }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          docker build -t $ECR_REGISTRY/${{ env.ECR_REPO }}:$IMAGE_TAG .
+          docker push $ECR_REGISTRY/${{ env.ECR_REPO }}:$IMAGE_TAG
+          echo "IMAGE_URI=$ECR_REGISTRY/${{ env.ECR_REPO }}:$IMAGE_TAG" >> $GITHUB_ENV
+          echo "IMAGE_TAG=$IMAGE_TAG" >> $GITHUB_ENV
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.9.5
+
+      - name: Terraform Init
+        working-directory: infra/10-infra
+        run: |
+          if [ -f backend.hcl ]; then
+            terraform init -backend-config=backend.hcl
+          else
+            terraform init
+          fi
+
+      - name: Terraform Plan
+        working-directory: infra/10-infra
+        env:
+          TF_VAR_region: ${{ env.AWS_REGION }}
+          TF_VAR_app_name: ${{ env.APP_NAME }}
+          TF_VAR_ecr_repo_name: ${{ env.ECR_REPO }}
+          TF_VAR_image_tag: ${{ env.IMAGE_TAG }}
+        run: terraform plan -no-color
+
+      - name: Terraform Apply
+        working-directory: infra/10-infra
+        env:
+          TF_VAR_region: ${{ env.AWS_REGION }}
+          TF_VAR_app_name: ${{ env.APP_NAME }}
+          TF_VAR_ecr_repo_name: ${{ env.ECR_REPO }}
+          TF_VAR_image_tag: ${{ env.IMAGE_TAG }}
+        run: terraform apply -auto-approve -no-color
+
+      - name: Show outputs
+        working-directory: infra/10-infra
+        run: terraform output
