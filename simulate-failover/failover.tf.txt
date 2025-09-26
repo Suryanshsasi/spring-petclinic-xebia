@@ -1,0 +1,24 @@
+# variables.tf
+variable "use_secondary" {
+  type = bool
+  default = false
+}
+
+# global_accelerator.tf (or route53.tf if using DNS failover)
+resource "aws_globalaccelerator_endpoint_group" "primary" {
+  listener_arn = aws_globalaccelerator_listener.https.id
+  endpoint_group_region = var.region
+  endpoint_configuration {
+    endpoint_id = aws_lb.alb.arn
+    weight = var.use_secondary ? 0 : 128
+  }
+}
+
+resource "aws_globalaccelerator_endpoint_group" "secondary" {
+  listener_arn = aws_globalaccelerator_listener.https.id
+  endpoint_group_region = var.secondary_region
+  endpoint_configuration {
+    endpoint_id = aws_lb_secondary.alb.arn
+    weight = var.use_secondary ? 128 : 0
+  }
+}
