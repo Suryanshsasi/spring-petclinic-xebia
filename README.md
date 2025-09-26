@@ -138,6 +138,7 @@ These same patterns apply to GorillaClinic’s future global pet health platform
 
 [ ] Enable AI-driven personalization with SageMaker / Bedrock.
 
+<img width="1128" height="772" alt="image" src="https://github.com/user-attachments/assets/958e5c55-3062-45b7-aea8-831b626a64d2" />
 
 
 ---
